@@ -1,0 +1,125 @@
+%% Problem 1 Project
+%Given a set of inputs and an initial condition, returns the vehicles
+%trajectory. If no initial condition is specified the default for the track
+%is used.
+%
+% INPUTS:
+%   U           an N-by-2 vector of inputs, where the first column is the
+%               steering input in radians, and the second column is the 
+%               longitudinal force in Newtons.
+%   
+%   x0          a 1-by-6 vector of the initial state of the vehicle.
+%
+% OUTPUTS:
+%   Y           an N-by-6 vector where each column is the trajectory of the
+%               state of the vehicle
+%
+% Written by: Matthew Porter
+% Created: 13 Nov 2017
+% Modified: 16 Nov 2017
+
+load TestTrack
+%if initial condition not given use default
+%if nargin<2
+    x0=[287,5,-176,0,2,0];
+%end
+
+%generate time vector
+%T=0:0.01:(size(U,1)-1)*0.01;
+
+%constants
+W=13720;
+Nw=2;
+f=0.01;
+Iz=2667;
+a=1.35;
+b=1.45;
+By=0.27;
+Cy=1.2;
+Dy=2921;
+Ey=-1.6;
+Shy=0;
+Svy=0;
+m=1400;
+
+%generate input functions
+% d_f=@(t) interp1(T,U(:,1),t,'previous','extrap');
+% F_x=@(t) interp1(T,U(:,2),t,'previous','extrap');
+% 
+% %slip angle functions in degrees
+% a_f=@(t,x) rad2deg(d_f(t)-atan2(x(4)+a*x(6),x(2)));
+% a_r=@(t,x) rad2deg(-atan2((x(4)-b*x(6)),x(2)));
+% 
+% %Nonlinear Tire Dynamics
+% phi_yf=@(t,x) (1-Ey)*(a_f(t,x)+Shy)+(Ey/By)*atan(By*(a_f(t,x)+Shy));
+% phi_yr=@(t,x) (1-Ey)*(a_r(t,x)+Shy)+(Ey/By)*atan(By*(a_r(t,x)+Shy));
+% 
+% F_yf=@(t,x) Dy*sin(Cy*atan(By*phi_yf(t,x)))+Svy;
+% F_yr=@(t,x) Dy*sin(Cy*atan(By*phi_yr(t,x)))+Svy;
+% 
+% %vehicle dynamics
+% df=@(t,x) [x(2)*cos(x(5))-x(4)*sin(x(5));...
+%           (-f*W+Nw*F_x(t)-F_yf(t,x)*sin(d_f(t)))/m+x(4)*x(6);...
+%           x(2)*sin(x(5))+x(4)*cos(x(5));...
+%           (F_yf(t,x)*cos(d_f(t))+F_yr(t,x))/m-x(2)*x(6);...
+%           x(6);...
+%           (F_yf(t,x)*a*cos(d_f(t))-F_yr(t,x)*b)/Iz];
+
+delta_s=0.1;
+N=1/delta_s;
+Ndec=2*N+(1+6+1)*(N+1);
+
+z0=zeros(Ndec,1);
+z0(2*N+(2:7))=x0';
+z0(2*N+8:8:end)=1; % initial guess of b
+x_prev=x0';
+
+Aeq=zeros(1+6,Ndec);
+Aeq(1:7,2*N+1:2*N+7)=eye(7);
+beq=[0;x_prev];
+
+lb=-inf*ones(Ndec,1);
+lb(1:2:2*N)=-0.5;
+lb(2:2:2*N)=-10000;
+ub=inf*ones(Ndec,1);
+ub(1:2:2*N)=0.5;
+ub(2:2:2*N)=6000;
+A=zeros(3*(N+1),Ndec);
+b=zeros(3*(N+1),1);
+i=1:2;
+% Section 1
+P1=TestTrack.bl(i,1);
+P2=TestTrack.bl(i,2);
+P3=TestTrack.br(i,1);
+P4=TestTrack.br(i,2);
+Ak=zeros(3,2);
+DP1=P1-P2;
+DP2=P2-P3;
+DP3=P3-P4;
+
+Ak(1,:)=[DP1(2),-DP1(1)];
+Ak(2,:)=[DP2(2),-DP2(1)];
+Ak(3,:)=[DP3(2),-DP3(1)];
+
+Pc=TestTrack.cline(i,1);
+bk=zeros(3,1);
+bk(1)=Ak(1,:)*P1;
+bk(2)=Ak(2,:)*P2;
+bk(3)=Ak(3,:)*P3;
+
+s=sign(Ak*Pc-bk);
+
+for k=1:1:N+1;
+    A(1+3*(k-1):3*k,2*N+8*(k-1)+[1,3])=-s.*Ak;
+    b(1+3*(k-1):3*k)=-s.*bk;
+end
+A(end-1,:)=-A(end-1,:);
+b(end-1,:)=-b(end-1,:);
+
+options=optimoptions('fmincon','Display','iter','SpecifyObjectiveGradient',true);
+%options.MaxFunctionEvaluations=1000;
+%options.MaxIterations = 2000; 
+[X,FVAL,EXITFLAG,OUTPUT]=fmincon(@(z) costfunction(z,Ndec),z0,A,b,Aeq,beq,lb,ub,@(z) mycon(z,N,delta_s),options);
+
+%Solve for trajectory      
+%[~,Y]=ode45(df,T,x0);
